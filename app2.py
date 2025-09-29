@@ -9,13 +9,12 @@ from collections import defaultdict
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
+from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
 # ------------------------
 # CONFIG
 # ------------------------
-API_KEY = "e88d28a3765b4b69a32d756e1608b434"
-API_URL = "https://api.football-data.org/v4/competitions/PD/matches"
-HEADERS = {"X-Auth-Token": API_KEY}
 DATA_FILE = Path("data/laliga.json")
 DATA_FILE.parent.mkdir(exist_ok=True)
 
@@ -85,7 +84,9 @@ def save_local_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def update_data():
+def update_data_with_auth(api_key):
+    API_URL = "https://api.football-data.org/v4/competitions/PD/matches"
+    HEADERS = {"X-Auth-Token": api_key}
     r = requests.get(API_URL, headers=HEADERS)
     if r.status_code != 200:
         st.error(f"Error API: {r.status_code} - {r.text}")
@@ -244,47 +245,54 @@ def generate_bet_recommendation_simple(ensemble_1x2, ensemble):
 st.set_page_config(page_title="LaLiga AI Predictor (local)", layout="wide")
 st.title("⚽ LaLiga — Análisis + Pronóstico (Poisson + ML)")
 
-if st.button("Actualizar datos desde API"):
-    raw = update_data(); st.success("Datos actualizados desde API")
-else: raw = load_local_data()
-if not raw: st.warning("No hay datos. Pulsa 'Actualizar datos desde API'."); st.stop()
+# Sidebar: API key y actualización manual
+st.sidebar.markdown("## 🔑 Actualizar datos API")
+api_key_input = st.sidebar.text_input("API Key", type="password")
+if st.sidebar.button("Actualizar ahora") and api_key_input:
+    raw = update_data_with_auth(api_key_input)
+else:
+    raw = load_local_data()
+
+if not raw:
+    st.warning("No hay datos. Pulsa 'Actualizar ahora' con tu API key.")
+    st.stop()
+
+# Autorefresh cada 30 segundos
+st_autorefresh(interval=30*1000, key="datarefresh")
+st.write(f"Último refresh: {datetime.now().strftime('%H:%M:%S')}")
 
 df_raw = normalize_df(pd.DataFrame(raw))
 df_prepared = prepare_outcomes(df_raw)
 
-# Estadísticas fiables de equipos
+# Estadísticas equipos
 team_stats = compute_team_stats(df_raw)
 st.markdown("### 📊 Estadísticas de cada equipo")
 df_team_stats = pd.DataFrame(team_stats).T.sort_values(by="jugados",ascending=False)
 st.dataframe(df_team_stats)
 
-# Entrenamos modelos
-st.info("Entrenando modelos ML con los datos locales (puede tardar unos segundos)...")
+# Entrenar modelos
+st.info("Entrenando modelos ML con los datos locales...")
 feat_df = df_prepared.copy()
 for t in ['Media goles local','Media goles encajados local','Media goles visitante','Media goles encajados visitante','Lambda local','Lambda visitante']:
     if t not in feat_df.columns: feat_df[t]=0
 models, feature_cols = train_ml_models(feat_df)
-st.success("Modelos listos (si hay suficientes datos).")
+st.success("Modelos listos.")
 
-# ------------------------
-# Selección de próximo partido
-# ------------------------
+# Selección próximo partido
 upcoming_matches = df_raw[df_raw['status'] != "FINISHED"].sort_values('utcDate')
 if upcoming_matches.empty:
-    st.warning("No hay próximos partidos disponibles en la API.")
+    st.warning("No hay próximos partidos disponibles.")
     st.stop()
 
 match_options = [f"{row['home_team']} vs {row['away_team']} ({row['utcDate'].strftime('%d-%m %H:%M')})"
-                 for _, row in upcoming_matches.iterrows()]
+                for _, row in upcoming_matches.iterrows()]
 selected_match = st.selectbox("Selecciona un próximo partido:", match_options, index=0)
 match_row = upcoming_matches.iloc[match_options.index(selected_match)]
 
 equipo_local = match_row['home_team']
 equipo_visitante = match_row['away_team']
 
-# ------------------------
-# Predicción del partido
-# ------------------------
+# Predicción
 match_feat = build_match_feat(team_stats, equipo_local, equipo_visitante)
 st.markdown("### 🔧 Features estimadas del partido")
 st.write(match_feat)
@@ -309,6 +317,7 @@ st.markdown("### ✅ Probabilidades finales (ensamblado Poisson + ML)")
 st.write(ensemble)
 st.write("1X2 final:", ensemble_1x2)
 
+# Recomendación
 st.markdown("### 📢 Recomendación de apuesta")
 recomendacion = generate_bet_recommendation_simple(ensemble_1x2, ensemble)
 st.write(recomendacion)
