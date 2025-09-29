@@ -11,12 +11,34 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
+import streamlit.components.v1 as components  # Para mostrar la hora del navegador
 
 # ------------------------
 # CONFIG
 # ------------------------
 DATA_FILE = Path("data/laliga.json")
 DATA_FILE.parent.mkdir(exist_ok=True)
+
+# ------------------------
+# FUNCIÓN PARA HORA DEL NAVEGADOR
+# ------------------------
+def browser_time_label(label="Último refresh"):
+    components.html(f"""
+    <div style="color:white; font-size:16px; font-weight:bold; margin-bottom:10px;">
+        {label}: <span id="browser_time"></span>
+    </div>
+    <script>
+        function updateTime() {{
+            const now = new Date();
+            const h = now.getHours().toString().padStart(2,'0');
+            const m = now.getMinutes().toString().padStart(2,'0');
+            const s = now.getSeconds().toString().padStart(2,'0');
+            document.getElementById('browser_time').innerText = h + ':' + m + ':' + s;
+        }}
+        updateTime();
+        setInterval(updateTime, 1000);
+    </script>
+    """, height=50)
 
 # ------------------------
 # UTIL: Poisson
@@ -259,7 +281,9 @@ if not raw:
 
 # Autorefresh cada 30 segundos
 st_autorefresh(interval=30*1000, key="datarefresh")
-st.write(f"Último refresh: {datetime.now().strftime('%H:%M:%S')}")
+
+# Mostrar hora del navegador
+browser_time_label("Último refresh")
 
 df_raw = normalize_df(pd.DataFrame(raw))
 df_prepared = prepare_outcomes(df_raw)
